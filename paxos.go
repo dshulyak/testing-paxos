@@ -2,7 +2,7 @@ package paxos
 
 import "fmt"
 
-type MessageType uint8
+type MessageType int8
 
 const (
 	MessageEmpty MessageType = iota
@@ -24,55 +24,70 @@ func (m MessageType) String() string {
 	return messageTypeString[m]
 }
 
+type Value []byte
+
+func (v Value) String() string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("0x%x", string(v))
+}
+
 type Message struct {
-	From, To uint64
+	From, To int
 
 	Type MessageType
 
-	Ballot uint64
+	Ballot int
 	// non-null if:
 	// Promise - previously selected value
 	// Accept  - value to select in current ballot
-	Value []byte
+	Value Value
 
 	// non-null only if the Type is Promise
-	VotedBallot uint64
+	VotedBallot int
+}
+
+func (m Message) String() string {
+	return fmt.Sprintf("Msg[From=%d To=%d Ballot=%d Type=%s VBallot=%d Value=%s]",
+		m.From, m.To, m.Ballot, m.Type, m.VotedBallot, m.Value,
+	)
 }
 
 type Paxos struct {
 	// unique node identifier
-	ID    uint64
-	Nodes []uint64
+	ID    int
+	Nodes []int
 
 	// current ballot. monotonically growing.
-	ballot uint64
+	ballot int
 
 	// tracking Promises
-	promises map[uint64]struct{}
+	promises map[int]struct{}
 	// value from a Promise with a highest observed ballot.
-	promiseValue []byte
+	promiseValue Value
 	// highest observed ballot among Promise.VotedBallot
-	promiseBallot uint64
+	promiseBallot int
 
 	// tracking Accepted
-	accepts map[uint64]struct{}
+	accepts map[int]struct{}
 
 	// selected value
-	votedValue []byte
+	votedValue Value
 	// ballot when the value was selected
-	votedBallot uint64
+	votedBallot int
 
 	// value proposed by this node.
-	value []byte
+	value Value
 
 	// value selected by the majority.
 	// Once set it can not be modified.
-	LearnedValue []byte
+	LearnedValue Value
 
 	Messages []Message
 }
 
-func (p *Paxos) Propose(value []byte) {
+func (p *Paxos) Propose(value Value) {
 	// Phase 1A.
 	// Increment a ballot and send Prepare to every other Acceptor.
 	p.value = value
@@ -81,20 +96,21 @@ func (p *Paxos) Propose(value []byte) {
 		if id != p.ID {
 			p.Messages = append(p.Messages, Message{
 				From:   p.ID,
-				To:     p.ID,
+				To:     id,
 				Type:   MessagePrepare,
 				Ballot: p.ballot,
 			})
 		}
 	}
-	p.promises = map[uint64]struct{}{}
+	p.promises = map[int]struct{}{}
 	p.promiseBallot = 0
 	p.promiseValue = nil
 	p.updatePromise(p.ID, p.votedValue, p.votedBallot)
-	p.accepts = map[uint64]struct{}{}
+
+	p.accepts = map[int]struct{}{}
 }
 
-func (p *Paxos) updatePromise(id uint64, votedValue []byte, votedBallot uint64) {
+func (p *Paxos) updatePromise(id int, votedValue Value, votedBallot int) {
 	p.promises[id] = struct{}{}
 	if votedBallot > p.promiseBallot {
 		p.promiseBallot = votedBallot
@@ -146,6 +162,8 @@ func (p *Paxos) Next(m Message) {
 						Value:  p.promiseValue,
 					})
 				}
+				p.votedValue = p.promiseValue
+				p.votedBallot = p.ballot
 				p.accepts[p.ID] = struct{}{}
 			}
 		}
@@ -172,7 +190,7 @@ func (p *Paxos) Next(m Message) {
 				if p.LearnedValue != nil {
 					panic("consistency violation")
 				}
-				p.LearnedValue = p.promiseValue
+				p.LearnedValue = p.votedValue
 			}
 		}
 	}
