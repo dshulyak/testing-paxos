@@ -66,7 +66,7 @@ type Paxos struct {
 	promises map[int]struct{}
 	// value from a Promise with a highest observed ballot.
 	promiseValue Value
-	// highest observed ballot among Promise.VotedBallot
+	// highest observed ballot from all received promises
 	promiseBallot int
 
 	// tracking Accepted
@@ -123,12 +123,11 @@ func (p *Paxos) Next(m Message) {
 		return
 	}
 	if m.To != p.ID {
-		panic(fmt.Errorf("id mismatch. destination %d, but was received by %d", m.To, p.ID))
+		panic(fmt.Errorf("id mismatch. destination %d, received %d", m.To, p.ID))
 	}
 	switch m.Type {
 	case MessagePrepare:
-		// Phase 1A. Save Prepare ballot if it higher then the local
-		// and reply with Promise, that includes previously voted ballot and value
+		// Phase 1A. If ballot if higher the local reply with Promise and save the ballot.
 		if m.Ballot > p.ballot {
 			p.ballot = m.Ballot
 			p.Messages = append(p.Messages, Message{
@@ -141,12 +140,12 @@ func (p *Paxos) Next(m Message) {
 			})
 		}
 	case MessagePromise:
-		// Phase 1B. Collect Promise's from majority, chose non-null
-		// promise from the highest observed vote. If there is no such promise
-		// chose locally proposed value.
+		// Phase 1B. Collect Promises from majority, chose non-null
+		// promise with the highest observed ballot.
+		// If there is no such promise chose locally proposed value.
 		if m.Ballot == p.ballot {
 			p.updatePromise(m.From, m.Value, m.VotedBallot)
-			if len(p.promises) == (len(p.Nodes)+1)/2 {
+			if len(p.promises) == (len(p.Nodes)/2)+1 {
 				if p.promiseValue == nil {
 					p.promiseValue = p.value
 				}
@@ -162,6 +161,7 @@ func (p *Paxos) Next(m Message) {
 						Value:  p.promiseValue,
 					})
 				}
+				// proposer gives a vote explicitly, without sending a message to itself
 				p.votedValue = p.promiseValue
 				p.votedBallot = p.ballot
 				p.accepts[p.ID] = struct{}{}
@@ -186,10 +186,7 @@ func (p *Paxos) Next(m Message) {
 		// previously chosen value.
 		if m.Ballot == p.ballot {
 			p.accepts[m.From] = struct{}{}
-			if len(p.accepts) == (len(p.Nodes)+1)/2 {
-				if p.LearnedValue != nil {
-					panic("consistency violation")
-				}
+			if len(p.accepts) == (len(p.Nodes)/2)+1 {
 				p.LearnedValue = p.votedValue
 			}
 		}

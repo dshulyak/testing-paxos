@@ -16,7 +16,7 @@ type consistencyCheck struct {
 }
 
 func (c *consistencyCheck) Init(t *rapid.T) {
-	size := rapid.IntRange(3, 3).Draw(t, "size").(int)
+	size := 4
 	c.nodes = make(map[int]*Paxos, size)
 	nodes := make([]int, size)
 	for id := 1; id <= size; id++ {
