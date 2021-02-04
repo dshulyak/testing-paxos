@@ -127,14 +127,14 @@ func (p *Paxos) Next(m Message) {
 	}
 	switch m.Type {
 	case MessagePrepare:
-		// Phase 1A. If ballot if higher the local reply with Promise and save the ballot.
+		// Phase 1A. If ballot is higher the local reply with Promise and save the ballot.
 		if m.Ballot > p.ballot {
 			p.ballot = m.Ballot
 			p.Messages = append(p.Messages, Message{
 				From:        p.ID,
 				To:          m.From,
 				Type:        MessagePromise,
-				Ballot:      p.ballot,
+				Ballot:      m.Ballot,
 				VotedBallot: p.votedBallot,
 				Value:       p.votedValue,
 			})
@@ -178,7 +178,7 @@ func (p *Paxos) Next(m Message) {
 				From:   p.ID,
 				To:     m.From,
 				Type:   MessageAccepted,
-				Ballot: p.ballot,
+				Ballot: m.Ballot,
 			})
 		}
 	case MessageAccepted:

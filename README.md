@@ -44,14 +44,14 @@ The property that we will be testing for paxos is consistency, and in can expres
 For the start i will define max number of steps that test generator can make.
 Test is terminated after that number of steps or if every node doesn't have an action.
 
-During test generations replicas are treated symmetric as well.
+During test generations replicas are treated symmetric.
 Test matrix without connectivity models looks like this (see actions for P1/P2 shortcuts):
 
-|Replica/Action     | P1  |  P2 |
-| ---               | --- | --- |
-| A                 |     |     |
-| B                 |     |     |
-| C                 |     |     |
+|Replica/Action | P1  |  P2 |
+| ---           | --- | --- |
+| A             |     |     |
+| B             |     |     |
+| C             |     |     |
 
 From the test table we need to draw every possible state at every step.
 With symmetry list of states will be as short as:
@@ -65,4 +65,7 @@ Without symmetry it will need to be extended futher:
 - A P2 , B P1 , C P2
 - A P2,  B P2 , C P1
 
-To generalize, if
+To generalize, test is considered unique only if it is also unique after
+replica prefixes are removed from actions.
+
+#### Test executor

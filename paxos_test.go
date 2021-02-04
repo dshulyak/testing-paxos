@@ -1,86 +1,126 @@
 package paxos
 
 import (
+	"bytes"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"pgregory.net/rapid"
 )
 
-type consistencyCheck struct {
-	nodes    map[int]*Paxos
-	messages []Message
-
-	proposeTimeout int
-	proposeTimers  map[int]int
-}
-
-func (c *consistencyCheck) Init(t *rapid.T) {
-	size := 4
-	c.nodes = make(map[int]*Paxos, size)
-	nodes := make([]int, size)
-	for id := 1; id <= size; id++ {
-		nodes[id-1] = id
-		c.nodes[id] = &Paxos{ID: id, Nodes: nodes}
-	}
-	c.proposeTimeout = 10
-	c.proposeTimers = map[int]int{}
-}
-
-func (c *consistencyCheck) Propose(t *rapid.T) {
-	id := rapid.IntRange(1, len(c.nodes)).Draw(t, "node").(int)
-
-	timer := c.proposeTimers[id]
-	if timer > 0 {
-		c.proposeTimers[id]--
-		t.Skipf("node %d cant yet propose", id)
-	}
-	c.proposeTimers[id] = c.proposeTimeout
-
-	if c.nodes[id].LearnedValue != nil {
-		t.Skipf("node %d already learned a value", id)
-	}
-	value := rapid.ArrayOf(3, rapid.Byte()).Draw(t, "value").([3]byte)
-	c.nodes[id].Propose(Value(value[:]))
-	for _, msg := range c.nodes[id].Messages {
-		t.Logf("sending a messages %v", msg)
-		c.messages = append(c.messages, msg)
-	}
-	c.nodes[id].Messages = nil
-}
-
-func (c *consistencyCheck) Send(t *rapid.T) {
-	if len(c.messages) == 0 {
-		t.Skip("no messages in the queue")
+func TestPaxos(t *testing.T) {
+	n := 3
+	nodes := []Paxos{}
+	replicas := make([]int, n)
+	for i := 1; i <= n; i++ {
+		replicas[i-1] = i
+		nodes = append(nodes, Paxos{ID: i, Nodes: replicas})
 	}
 
-	msg := c.messages[0]
-	node := c.nodes[msg.To]
+	gen, err := NewGen(
+		WithExplicitPartitions(
+			[][]int{
+				{1, 2},
+				{3},
+			},
+			[][]int{
+				{1},
+				{2, 3},
+			},
+		),
+		WithReplicas(replicas...),
+		WithLeaders(1, 3),
+		WithSteps(9),
+	)
 
-	node.Next(msg)
+	require.NoError(t, err)
 
-	t.Logf("delivered a message %v", msg)
-	copy(c.messages, c.messages[1:])
-	c.messages = c.messages[:len(c.messages)-1]
-	for _, msg := range node.Messages {
-		t.Logf("sending a messages %v", msg)
-		c.messages = append(c.messages, msg)
-	}
-	node.Messages = nil
-}
+	runTestCase := func(tc *TestCase) error {
+		// per step message queue
+		messages := []Message{}
+		delayed := []Message{}
 
-func (c *consistencyCheck) Check(t *rapid.T) {
-	var value Value
-	for _, n := range c.nodes {
-		if n.LearnedValue != nil {
-			if value != nil {
-				require.Equal(t, value, n.LearnedValue, "Node=%v", n.ID)
+		cluster := make(map[int]*Paxos, n)
+		for i := range nodes {
+			node := nodes[i]
+			cluster[node.ID] = &node
+		}
+
+		for {
+			network, actions := tc.Next()
+			if network == nil || actions == nil {
+				return nil
 			}
-			value = n.LearnedValue
+
+			for _, node := range cluster {
+				if actions.IsLeader(node.ID) {
+					node.Propose([]byte{byte(node.ID)})
+				}
+				messages = append(messages, node.Messages...)
+				node.Messages = node.Messages[:0]
+			}
+
+			for _, msg := range messages {
+				// messages that can't reach other node are delayed not dropped
+				if network.Reachable(msg.From, msg.To) {
+					cluster[msg.To].Next(msg)
+				} else {
+					delayed = append(delayed, msg)
+				}
+			}
+			messages = delayed
+			delayed = delayed[:0]
+
+			var learned Value
+			for _, node := range cluster {
+				if node.LearnedValue != nil && learned == nil {
+					learned = node.LearnedValue
+				} else if node.LearnedValue != nil {
+					if bytes.Compare(learned, node.LearnedValue) != 0 {
+						return fmt.Errorf("%v != %v", learned, node.LearnedValue)
+					}
+				}
+			}
 		}
 	}
-}
 
-func TestConsistency(t *testing.T) {
-	rapid.Check(t, rapid.Run(new(consistencyCheck)))
+	var (
+		workers = runtime.NumCPU()
+		queue   = make(chan *TestCase, workers)
+		errc    = make(chan error, workers)
+		wg      sync.WaitGroup
+	)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for tc := range queue {
+				err := runTestCase(tc)
+				if err != nil {
+					errc <- err
+					return
+				}
+			}
+		}()
+	}
+
+	for tc := gen.Next(); tc != nil && err == nil; tc = gen.Next() {
+		select {
+		case queue <- tc:
+		case err = <-errc:
+			assert.NoError(t, err)
+		}
+	}
+
+	close(queue)
+	wg.Wait()
+	close(errc)
+	for err := range errc {
+		assert.NoError(t, err)
+	}
+	t.Logf("Test cases: %d", gen.Count())
 }
