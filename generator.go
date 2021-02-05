@@ -42,7 +42,7 @@ func WithExplicitPartitions(networks ...[][]int) GenOption {
 
 func WithReplicas(replicas ...int) GenOption {
 	return func(g *Generator) error {
-		g.replicas = replicas
+		g.nodes = replicas
 		return nil
 	}
 }
@@ -61,7 +61,7 @@ func WithSteps(stepLimit int) GenOption {
 // Manually limiting leader down to 2 (for example) will significantly reduce scope of the test.
 func WithLeaders(leaders ...int) GenOption {
 	return func(g *Generator) error {
-		if g.replicas == nil {
+		if g.nodes == nil {
 			return fmt.Errorf("replicas must be configured earlier than leaders")
 		}
 		g.actions = append(g.actions, Actions{})
@@ -119,7 +119,7 @@ type Generator struct {
 	// permutation of actions and partitions
 	states []stepState
 
-	replicas   []int
+	nodes      []int
 	partitions []Partition
 	actions    []Actions
 }
@@ -167,6 +167,10 @@ type TestCase struct {
 	step   int
 }
 
+func (t *TestCase) Nodes() []int {
+	return t.gen.nodes
+}
+
 func (t *TestCase) Next() (Partition, Actions) {
 	if t.step == len(t.states) {
 		return nil, nil
@@ -176,6 +180,18 @@ func (t *TestCase) Next() (Partition, Actions) {
 	t.step++
 
 	return t.gen.partitions[state.partition], t.gen.actions[state.actions]
+}
+
+func (t *TestCase) String() string {
+	var buf bytes.Buffer
+	for i := 0; i <= t.step && i < len(t.states); i++ {
+		state := t.gen.states[t.states[i]]
+		fmt.Fprintf(&buf, "step %d: %s %s\n", i+1,
+			t.gen.partitions[state.partition],
+			t.gen.actions[state.actions],
+		)
+	}
+	return buf.String()
 }
 
 type Partition map[int]map[int]struct{}
@@ -207,15 +223,9 @@ func (p Partition) Reachable(from, to int) bool {
 func (p Partition) String() string {
 	var b bytes.Buffer
 	b.WriteString("Routes(")
-	var first = true
 	for from, dest := range p {
-		if first {
-			first = false
-		} else {
-			b.WriteString(",")
-		}
 		for to := range dest {
-			fmt.Fprintf(&b, "%d=>%d", from, to)
+			fmt.Fprintf(&b, "%d=>%d,", from, to)
 		}
 	}
 	b.WriteString(")")
@@ -226,4 +236,14 @@ type Actions map[int]bool
 
 func (a Actions) IsLeader(replica int) bool {
 	return a[replica]
+}
+
+func (a Actions) String() string {
+	var buf bytes.Buffer
+	buf.WriteString("Cluster(")
+	for id := range a {
+		fmt.Fprintf(&buf, "leader=%d", id)
+	}
+	buf.WriteString(")")
+	return buf.String()
 }
