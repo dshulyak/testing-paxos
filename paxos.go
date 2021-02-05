@@ -145,7 +145,7 @@ func (p *Paxos) Next(m Message) {
 		// If there is no such promise chose locally proposed value.
 		if m.Ballot == p.ballot {
 			p.updatePromise(m.From, m.Value, m.VotedBallot)
-			if len(p.promises) == (len(p.Nodes) / 2) {
+			if len(p.promises) == (len(p.Nodes)/2)+1 {
 				if p.promiseValue == nil {
 					p.promiseValue = p.value
 				}
