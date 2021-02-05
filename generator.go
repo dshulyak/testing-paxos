@@ -2,8 +2,11 @@ package paxos
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"sync"
 )
 
@@ -94,7 +97,12 @@ func NewGen(opts ...GenOption) (*Generator, error) {
 			gen.states = append(gen.states, stepState{actions: i, partition: j})
 		}
 	}
-	gen.cnts = make([]int, gen.stepLimit)
+	if len(gen.states) > math.MaxInt16 {
+		return nil, fmt.Errorf("max number of possible states %d. reduce by removing actions or partitions", math.MaxInt16)
+	}
+	if gen.iter == nil {
+		gen.iter = &productIterator{gen: gen, cnts: make([]int16, gen.stepLimit)}
+	}
 	return gen, nil
 }
 
@@ -107,10 +115,8 @@ func (s stepState) String() string {
 }
 
 type Generator struct {
-	mu    sync.Mutex
-	ended bool
-	// permutation counters
-	cnts []int
+	mu   sync.Mutex
+	iter tcIterator
 
 	// total number of generated test cases
 	cnt int
@@ -130,27 +136,17 @@ func (g *Generator) Next() *TestCase {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	if g.ended {
+	if !g.iter.Next() {
 		return nil
 	}
-
-	// generates a product of all states repeating it stepLimit times
-	// similar to python's itertool.product but stack is kept on the generator object.
-	steps := make([]int, g.stepLimit)
-	copy(steps, g.cnts)
-
-	for i := len(g.cnts) - 1; i >= 0; i-- {
-		g.cnts[i]++
-		if g.cnts[i] < len(g.states) {
-			break
-		}
-		g.cnts[i] = 0
-		if i == 0 {
-			g.ended = true
-		}
-	}
 	g.cnt++
-	return &TestCase{gen: g, states: steps}
+	return g.iter.Current()
+}
+
+func (g *Generator) Error() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.iter.Error()
 }
 
 // Count returns total number of generated test cases.
@@ -163,7 +159,7 @@ func (gen *Generator) Count() int {
 type TestCase struct {
 	gen *Generator
 
-	states []int
+	states []int16
 	step   int
 }
 
@@ -192,6 +188,30 @@ func (t *TestCase) String() string {
 		)
 	}
 	return buf.String()
+}
+
+func (t *TestCase) Marshal() ([]byte, error) {
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, int64(len(t.states))); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(&buf, binary.LittleEndian, t.states); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (t *TestCase) Unmarshal(b []byte) error {
+	buf := bytes.NewBuffer(b)
+	var lth int64
+	if err := binary.Read(buf, binary.LittleEndian, &lth); err != nil {
+		return err
+	}
+	t.states = make([]int16, lth)
+	if err := binary.Read(buf, binary.LittleEndian, t.states); err != nil {
+		return err
+	}
+	return nil
 }
 
 type Partition map[int]map[int]struct{}
@@ -246,4 +266,87 @@ func (a Actions) String() string {
 	}
 	buf.WriteString(")")
 	return buf.String()
+}
+
+type tcIterator interface {
+	Next() bool
+	Error() error
+	Current() *TestCase
+}
+
+type productIterator struct {
+	gen *Generator
+
+	ended bool
+	// permutation counters
+	cnts    []int16
+	current *TestCase
+}
+
+func (pi *productIterator) Next() bool {
+	if pi.ended {
+		return false
+	}
+
+	states := make([]int16, pi.gen.stepLimit)
+	copy(states, pi.cnts)
+
+	for i := len(pi.cnts) - 1; i >= 0; i-- {
+		pi.cnts[i]++
+		if pi.cnts[i] < int16(len(pi.gen.states)) {
+			break
+		}
+		pi.cnts[i] = 0
+		if i == 0 {
+			pi.ended = true
+		}
+	}
+
+	pi.current = &TestCase{gen: pi.gen, states: states}
+	return true
+}
+
+func (pi *productIterator) Current() *TestCase {
+	return pi.current
+}
+
+func (pi *productIterator) Error() error {
+	return nil
+}
+
+func WithReplay(r *Replay) GenOption {
+	return func(gen *Generator) error {
+		gen.iter = &replayIterator{gen: gen, r: r}
+		return nil
+	}
+}
+
+type replayIterator struct {
+	gen *Generator
+
+	r       *Replay
+	err     error
+	current *TestCase
+}
+
+func (r *replayIterator) Next() bool {
+	if r.err != nil {
+		return false
+	}
+	r.current, r.err = r.r.Read()
+	if r.current != nil {
+		r.current.gen = r.gen
+	}
+	return r.err == nil
+}
+
+func (r *replayIterator) Current() *TestCase {
+	return r.current
+}
+
+func (r *replayIterator) Error() error {
+	if r.err == nil || errors.Is(r.err, io.EOF) {
+		return nil
+	}
+	return r.err
 }
