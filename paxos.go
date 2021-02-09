@@ -59,6 +59,9 @@ type Paxos struct {
 	ID    int
 	Nodes []int
 
+	// Round 1 and 2 majorities
+	R1Majority, R2Majority int
+
 	// current ballot. monotonically growing.
 	ballot int
 
@@ -145,7 +148,7 @@ func (p *Paxos) Next(m Message) {
 		// If there is no such promise chose locally proposed value.
 		if m.Ballot == p.ballot {
 			p.updatePromise(m.From, m.Value, m.VotedBallot)
-			if len(p.promises) == (len(p.Nodes)/2)+1 {
+			if len(p.promises) == p.R1Majority {
 				if p.promiseValue == nil {
 					p.promiseValue = p.value
 				}
@@ -186,7 +189,7 @@ func (p *Paxos) Next(m Message) {
 		// previously chosen value.
 		if m.Ballot == p.ballot {
 			p.accepts[m.From] = struct{}{}
-			if len(p.accepts) == (len(p.Nodes)/2)+1 {
+			if len(p.accepts) == p.R2Majority {
 				p.LearnedValue = p.votedValue
 			}
 		}

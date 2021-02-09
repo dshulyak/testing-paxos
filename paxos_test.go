@@ -13,7 +13,7 @@ func paxosRunner(tc *TestCase) error {
 	nodes := tc.Nodes()
 	cluster := make(map[int]*Paxos, len(nodes))
 	for _, id := range nodes {
-		cluster[id] = &Paxos{ID: id, Nodes: nodes}
+		cluster[id] = &Paxos{ID: id, Nodes: nodes, R1Majority: 4, R2Majority: 2}
 	}
 
 	for {
