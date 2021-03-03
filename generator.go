@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"sync"
 )
 
@@ -75,6 +76,17 @@ func WithLeaders(leaders ...int) GenOption {
 	}
 }
 
+func WithRNG(percent int, seed int64) GenOption {
+	return func(g *Generator) error {
+		if g.percent > 100 || g.percent < 0 {
+			return fmt.Errorf("percent %d must be in range of [0, 100]", g.percent)
+		}
+		g.percent = percent
+		g.seed = seed
+		return nil
+	}
+}
+
 func NewGen(opts ...GenOption) (*Generator, error) {
 	gen := &Generator{}
 	for _, opt := range opts {
@@ -103,6 +115,13 @@ func NewGen(opts ...GenOption) (*Generator, error) {
 	if gen.iter == nil {
 		gen.iter = &productIterator{gen: gen, cnts: make([]int16, gen.stepLimit)}
 	}
+	if gen.percent > 0 && gen.percent <= 100 {
+		gen.iter = &randomIterator{
+			percent: gen.percent,
+			iter:    gen.iter,
+			rng:     rand.New(rand.NewSource(gen.seed)),
+		}
+	}
 	return gen, nil
 }
 
@@ -117,6 +136,9 @@ func (s stepState) String() string {
 type Generator struct {
 	mu   sync.Mutex
 	iter tcIterator
+
+	percent int
+	seed    int64
 
 	// total number of generated test cases
 	cnt int

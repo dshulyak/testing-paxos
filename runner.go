@@ -17,6 +17,8 @@ var (
 	workers = flag.Int("workers", runtime.NumCPU(), "number of workers that will run test cases")
 	replay  = flag.String("replay", "", "replay test cases from the file")
 	dir     = flag.String("dir", "", "directory for replay files. current workdir by default")
+	percent = flag.Int("percent", 100, "percent of the test cases to execute")
+	seed    = flag.Int64("seed", time.Now().Unix(), "seed is used only if percent is less then 100. default is a current time in seconds.")
 )
 
 func makePath(name string) string {
@@ -57,6 +59,7 @@ func Run(t testing.TB, run Runner, opts ...GenOption) {
 		r.existing = true
 		r.replay = rpl
 	}
+	opts = append(opts, WithRNG(*percent, *seed))
 
 	gen, err := NewGen(opts...)
 	require.NoError(t, err)
