@@ -5,7 +5,7 @@ import (
 )
 
 type randomIterator struct {
-	// any number between 0 and 100. where 100 means execute every test case
+	// any number between 1 and 100. where 100 means execute every test case
 	percent int
 	rng     *rand.Rand
 	iter    tcIterator
@@ -14,7 +14,7 @@ type randomIterator struct {
 func (r *randomIterator) Next() bool {
 	for {
 		next := r.iter.Next()
-		if !next || r.rng.Intn(100) <= r.percent {
+		if !next || r.rng.Intn(99) <= r.percent-1 {
 			return next
 		}
 	}
