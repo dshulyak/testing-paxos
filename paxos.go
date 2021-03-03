@@ -137,7 +137,7 @@ func (p *Paxos) Next(m Message) {
 	}
 	switch m.Type {
 	case MessagePrepare:
-		// Phase 1A. If msg ballot is higher than the local ballot reply with Promise and save the ballot.
+		// Phase 1B. If msg ballot is higher than the local ballot reply with Promise and save the ballot.
 		if m.Ballot > p.ballot {
 			p.ballot = m.Ballot
 			p.Messages = append(p.Messages, Message{
@@ -150,7 +150,7 @@ func (p *Paxos) Next(m Message) {
 			})
 		}
 	case MessagePromise:
-		// Phase 1B. Collect Promises from majority, chose non-null
+		// Phase 2A. Collect Promises from majority, chose non-null
 		// promise with the highest observed voted ballot.
 		// If there is no existing non-null promise propose locally chosen value.
 		if m.Ballot == p.ballot {
@@ -178,7 +178,7 @@ func (p *Paxos) Next(m Message) {
 			}
 		}
 	case MessageAccept:
-		// Phase 2A. If Accept ballot is atleast as high as a local ballot
+		// Phase 2B. If Accept ballot is atleast as high as a local ballot
 		// save proposed value and ballot and reply with Accepted.
 		if m.Ballot >= p.ballot {
 			p.ballot = m.Ballot
@@ -192,7 +192,7 @@ func (p *Paxos) Next(m Message) {
 			})
 		}
 	case MessageAccepted:
-		// Phase 2B. Collect Accepted from majority, set Learned value to
+		// Collect Accepted from majority, set Learned value to
 		// previously chosen value.
 		if m.Ballot == p.ballot {
 			p.accepts[m.From] = struct{}{}
