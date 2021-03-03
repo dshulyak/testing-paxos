@@ -60,9 +60,13 @@ type Paxos struct {
 	Nodes []int
 
 	// Round 1 and 2 majorities
+	// For correctness it is not necessary to get exactly half + 1 responses
+	// in every round, but it is necessary to get an intersection between two
+	// majorities
 	R1Majority, R2Majority int
 
 	// current ballot. monotonically growing.
+	// persisted in practice
 	ballot int
 
 	// tracking Promises
@@ -75,18 +79,21 @@ type Paxos struct {
 	// tracking Accepted
 	accepts map[int]struct{}
 
-	// selected value
+	// selected value. persisted
 	votedValue Value
-	// ballot when the value was selected
+	// ballot when the value was selected. persisted
 	votedBallot int
 
 	// value proposed by this node.
 	value Value
 
 	// value selected by the majority.
-	// Once set it can not be modified.
+	// Algorithm is invalid if it is modified more to any other value after
+	// it was updated the first time.
 	LearnedValue Value
 
+	// current replica outbox. only messages to other nodes.
+	// state changes to the current replica are applied immediatly.
 	Messages []Message
 }
 
@@ -130,7 +137,7 @@ func (p *Paxos) Next(m Message) {
 	}
 	switch m.Type {
 	case MessagePrepare:
-		// Phase 1A. If ballot is higher the local reply with Promise and save the ballot.
+		// Phase 1A. If msg ballot is higher than the local ballot reply with Promise and save the ballot.
 		if m.Ballot > p.ballot {
 			p.ballot = m.Ballot
 			p.Messages = append(p.Messages, Message{
@@ -144,8 +151,8 @@ func (p *Paxos) Next(m Message) {
 		}
 	case MessagePromise:
 		// Phase 1B. Collect Promises from majority, chose non-null
-		// promise with the highest observed ballot.
-		// If there is no such promise chose locally proposed value.
+		// promise with the highest observed voted ballot.
+		// If there is no existing non-null promise propose locally chosen value.
 		if m.Ballot == p.ballot {
 			p.updatePromise(m.From, m.Value, m.VotedBallot)
 			if len(p.promises) == p.R1Majority {
